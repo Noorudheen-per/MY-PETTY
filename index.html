@@ -353,7 +353,7 @@ $('saveCid').onclick = () => {
 };
 $('loginBtn').onclick = () => pca.loginRedirect({ scopes: SCOPES, prompt: 'select_account' });
 
-/* ===== Summary: first worksheet of the workbook ===== */
+/* ===== Summary: the worksheet holding the "SUM OF B:B" totals block ===== */
 const EDITABLE = ['DEBIT CARD', 'WALLET', 'CREDIT CARD NOW'];
 let sumSheet = '';
 const colName = n => { let t = ''; for (n++; n > 0; n = Math.floor((n - 1) / 26)) t = String.fromCharCode(65 + (n - 1) % 26) + t; return t; };
@@ -362,13 +362,18 @@ const sheetPath = n => `/worksheets('${encodeURIComponent(n.replace(/'/g, "''"))
 async function loadSummary(){
   try{
     const sheets = (await gx(`/worksheets?$select=name,position`)).value.sort((a, b) => a.position - b.position);
-    sumSheet = sheets[0].name;
     $('sumTitle').textContent = 'Totals';
-    const r = await gx(`${sheetPath(sumSheet)}/usedRange(valuesOnly=true)?$select=text,address`);
+    // Use whichever sheet holds the "SUM OF B:B" block, so adding or reordering sheets doesn't break it
+    let r = null, g = [];
+    for (const s of sheets){
+      const x = await gx(`${sheetPath(s.name)}/usedRange(valuesOnly=true)?$select=text,address`);
+      const t = (x.text || []).map(row => row.map(v => String(v).trim()));
+      if (t.some(row => row.some(v => v.toUpperCase() === 'SUM OF B:B'))){ r = x; g = t; sumSheet = s.name; break; }
+    }
+    if (!r){ $('summary').innerHTML = '<div class="empty">Totals block not found (looking for "SUM OF B:B")</div>'; return; }
     // Top-left of the used range, so grid positions can be turned back into cell addresses
     const m = /!?\$?([A-Z]+)\$?(\d+)/.exec(String(r.address).split('!').pop());
     const c0 = [...m[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1, r0 = +m[2];
-    const g = (r.text || []).map(row => row.map(t => String(t).trim()));
     const cell = (i, j) => { const k = g[i].findIndex((t, x) => x > j && t); return { value: k < 0 ? '' : g[i][k], addr: k < 0 ? '' : colName(c0 + k) + (r0 + i) }; };
     // Only the totals block: the label column around the "SUM OF B:B" cell, with the value to its right
     let ar = -1, ac = -1;
