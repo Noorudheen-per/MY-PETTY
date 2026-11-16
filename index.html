@@ -82,6 +82,27 @@ h2 button{background:none;border:0;color:var(--navy);font:inherit;font-size:12px
 .sum.done{background:#d9f2e1;color:#16794a}
 .sum.edit{cursor:pointer}
 .sum.edit i{font-style:normal;opacity:.6;font-size:13px}
+.cc-hero{background:linear-gradient(135deg,var(--navy),var(--navy-2));color:#fff;border-radius:16px;padding:16px;margin-bottom:14px}
+.cc-hero small{opacity:.8;font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+.cc-hero .big{font-family:"IBM Plex Mono",monospace;font-size:28px;font-weight:700;margin:4px 0 10px}
+.cc-hero .big.neg{color:#ffb4b4}
+.bar{height:8px;border-radius:6px;background:rgba(127,127,127,.25);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:6px;background:#3fb87a}
+.bar i.warn{background:#f5a524}.bar i.over{background:#ef4444}
+.cc-hero .row{display:flex;justify-content:space-between;font-size:12px;opacity:.9;margin-top:6px}
+.cc-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.cc-tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.cc-tile small{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.cc-tile b{display:block;font-family:"IBM Plex Mono",monospace;font-size:16px;margin-top:4px}
+.plan{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.plan .t{display:flex;justify-content:space-between;gap:10px;font-weight:600;font-size:15px}
+.plan .t span:last-child{font-family:"IBM Plex Mono",monospace}
+.plan .m{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin:6px 0 8px}
+.plan .m.warn{color:#b26b00}
+.plan.edit{cursor:pointer}
+.plan.edit:active{background:var(--chip)}
+.plan .tap{color:var(--navy);font-weight:600}
+.plan .m:last-child{margin:8px 0 0}
 code{background:var(--chip);padding:2px 5px;border-radius:5px;font-size:12px;word-break:break-all}
 </style>
 </head>
@@ -106,7 +127,7 @@ code{background:var(--chip);padding:2px 5px;border-radius:5px;font-size:12px;wor
   </section>
 
   <section id="app" class="hidden">
-    <div class="tabs" id="tabs"><button type="button" class="on" data-p="pageEntry">Entry</button><button type="button" data-p="pageSummary">Summary</button><button type="button" data-p="pageDetails">Details</button></div>
+    <div class="tabs" id="tabs"><button type="button" class="on" data-p="pageEntry">Entry</button><button type="button" data-p="pageSummary">Summary</button><button type="button" data-p="pageDetails">Details</button><button type="button" data-p="pageCard">Card</button></div>
     <div id="pageEntry">
     <div class="hand"><small>Bills in hand</small><b id="handTotal">—</b></div>
 
@@ -145,6 +166,10 @@ code{background:var(--chip);padding:2px 5px;border-radius:5px;font-size:12px;wor
     <div id="pageDetails" class="hidden">
       <h2 style="margin-top:0"><span id="detTitle">Details</span><button id="detRefresh" type="button">Refresh</button></h2>
       <div class="list" id="byPurpose"><div class="empty">Loading…</div></div>
+    </div>
+    <div id="pageCard" class="hidden">
+      <h2 style="margin-top:0"><span>Credit Card</span><button id="ccRefresh" type="button">Refresh</button></h2>
+      <div id="ccBody"><div class="list"><div class="empty">Loading…</div></div></div>
     </div>
   </section>
 </div>
@@ -415,6 +440,7 @@ $('tabs').onclick = ev => {
   [...$('tabs').children].forEach(x => { x.classList.toggle('on', x === b); $(x.dataset.p).classList.toggle('hidden', x !== b); });
   if (b.dataset.p === 'pageSummary') loadSummary();
   if (b.dataset.p === 'pageDetails') loadDetails();
+  if (b.dataset.p === 'pageCard') loadCard();
 };
 $('sumRefresh').onclick = loadSummary;
 
@@ -443,6 +469,83 @@ async function loadDetails(){
   }
 }
 $('detRefresh').onclick = loadDetails;
+
+/* ===== Card: the worksheet titled "CREDIT CARD REPORT" ===== */
+let ccSheet = '', ccBase = null;
+const num = t => { const s = String(t || '').trim(); if (!s || s === '-') return 0; const n = parseFloat(s.replace(/[(),%\s]/g, '')); return isNaN(n) ? 0 : (/^\(.*\)$/.test(s) ? -n : n); };
+async function loadCard(){
+  const box = $('ccBody');
+  try{
+    const sheets = (await gx(`/worksheets?$select=name,position`)).value.sort((a, b) => a.position - b.position);
+    let g = null;
+    for (const s of sheets){
+      const r = await gx(`${sheetPath(s.name)}/usedRange(valuesOnly=true)?$select=text,address`);
+      const t = (r.text || []).map(row => row.map(x => String(x).trim()));
+      if (t.some(row => row.some(v => v.toUpperCase() === 'CREDIT CARD REPORT'))){
+        g = t; ccSheet = s.name;
+        const m = /\$?([A-Z]+)\$?(\d+)/.exec(String(r.address).split('!').pop());
+        ccBase = { c: [...m[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1, r: +m[2] };
+        break;
+      }
+    }
+    if (!g){ box.innerHTML = '<div class="list"><div class="empty">Sheet with "CREDIT CARD REPORT" not found</div></div>'; return; }
+    // Summary rows: label, then the next non-empty cell to its right
+    const find = label => { for (const row of g){ const j = row.findIndex(v => v.toUpperCase().startsWith(label)); if (j >= 0){ const k = row.findIndex((v, x) => x > j && v); if (k >= 0) return row[k]; } } return ''; };
+    const S = { limit: find('CARD LIMIT'), spend: find('CURRENT CARD SPEND'), inst: find('INSTALLMENT BALANCE'), used: find('TOTAL LIMIT USED'), avail: find('AVAILABLE LIMIT'), util: find('LIMIT UTILIZATION'), monthly: find('MONTHLY INSTALLMENTS DUE') };
+    // Installment table: header row containing "Description", rows until TOTAL
+    const h = g.findIndex(row => row.some(v => v.toUpperCase() === 'DESCRIPTION'));
+    const plans = [];
+    if (h >= 0){
+      const H = g[h].map(v => v.toUpperCase().replace(/\s+/g, ' '));
+      const col = k => H.findIndex(v => v.startsWith(k));
+      const c = { d: col('DESCRIPTION'), ten: col('TENURE'), mon: col('MONTHLY'), paid: col('MONTHS PAID'), rem: col('MONTHS REMAINING'), bal: col('BALANCE'), amtPaid: col('AMOUNT PAID') };
+      for (let i = h + 1; i < g.length; i++){
+        const d = g[i][c.d]; if (!d) continue;
+        if (d.toUpperCase() === 'TOTAL') break;
+        plans.push({ addr: c.paid >= 0 ? colName(ccBase.c + c.paid) + (ccBase.r + i) : '', paidAmt: g[i][c.amtPaid] || '', d, ten: num(g[i][c.ten]), mon: g[i][c.mon], paid: num(g[i][c.paid]), rem: num(g[i][c.rem]), bal: g[i][c.bal] });
+      }
+    }
+    const util = num(S.util), av = num(S.avail);
+    const cls = util > 100 ? 'over' : util > 75 ? 'warn' : '';
+    box.innerHTML = `
+      <div class="cc-hero">
+        <small>Available limit</small>
+        <div class="big${av < 0 ? ' neg' : ''}">${esc(S.avail || '—')}</div>
+        <div class="bar"><i class="${cls}" style="width:${Math.min(util, 100)}%"></i></div>
+        <div class="row"><span>Used ${esc(S.used || '—')} of ${esc(S.limit || '—')}</span><span>${esc(S.util || '—')}</span></div>
+      </div>
+      <div class="cc-grid">
+        <div class="cc-tile"><small>Card spend</small><b>${esc(S.spend || '—')}</b></div>
+        <div class="cc-tile"><small>Installments left</small><b>${esc(S.inst || '—')}</b></div>
+        <div class="cc-tile" style="grid-column:1/-1"><small>Monthly installments due</small><b>${esc(S.monthly || '—')}</b></div>
+      </div>
+      <h2><span>Installment plans</span></h2>
+      ${plans.length ? plans.map(p => {
+        const done = p.ten ? Math.round(p.paid / p.ten * 100) : 0;
+        return `<div class="plan${p.addr ? ' edit' : ''}" data-addr="${p.addr}" data-d="${esc(p.d)}" data-paid="${p.paid}" data-ten="${p.ten}"><div class="t"><span>${esc(p.d)}</span><span>${esc(p.bal)}</span></div>
+          <div class="m${p.paid === 0 ? ' warn' : ''}"><span>${esc(p.mon)}/mo · ${p.paid}/${p.ten} paid</span><span>${p.rem} left · ${done}%</span></div>
+          <div class="m"><span>Paid ${esc(p.paidAmt && p.paidAmt !== '-' ? p.paidAmt : '0.00')}</span>${p.addr ? '<span class="tap">Tap to update ✎</span>' : ''}</div>
+          <div class="bar"><i style="width:${done}%"></i></div></div>`;
+      }).join('') : '<div class="list"><div class="empty">No installment plans</div></div>'}`;
+  }catch(err){
+    console.error(err);
+    box.innerHTML = `<div class="list"><div class="empty">Couldn't load card (${esc(err.message.slice(0,80))})</div></div>`;
+  }
+}
+$('ccRefresh').onclick = loadCard;
+$('ccBody').onclick = async ev => {
+  const el = ev.target.closest('.plan.edit'); if (!el) return;
+  const ten = +el.dataset.ten, cur = +el.dataset.paid;
+  const v = prompt(`${el.dataset.d}\nMonths paid (0–${ten})`, String(Math.min(cur + 1, ten)));
+  if (v == null || v.trim() === '') return;
+  const n = parseInt(v, 10);
+  if (isNaN(n) || n < 0 || (ten && n > ten)){ alert(`Enter a number from 0 to ${ten}`); return; }
+  el.style.opacity = .5;
+  try{
+    await gx(`${sheetPath(ccSheet)}/range(address='${el.dataset.addr}')`, { method: 'PATCH', body: JSON.stringify({ values: [[n]] }) });
+  }catch(err){ console.error(err); alert(`Couldn't save: ${err.message.slice(0,160)}`); }
+  loadCard();
+};
 
 async function boot(){
   $('dt').value = todayISO();
